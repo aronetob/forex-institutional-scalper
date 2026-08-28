@@ -86,7 +86,6 @@ class DataProvider:
     def _init_mt5(self) -> bool:
         """Initializes MT5 connection with retry resilience."""
         if not MT5_AVAILABLE:
-            logger.warning("MetaTrader5 python module is not available.")
             return False
 
         for attempt in range(3):
@@ -103,6 +102,8 @@ class DataProvider:
 
     def ensure_connection(self) -> bool:
         """Ensures MT5 is connected, re-initializing if needed."""
+        if not MT5_AVAILABLE:
+            return False
         if not self.connected:
             return self._init_mt5()
         return True
@@ -112,16 +113,16 @@ class DataProvider:
         try:
             import yfinance as yf
             tf_map = {
-                "M1": ("1d", "1m"),
+                "M1": ("2d", "1m"),
                 "M5": ("5d", "5m"),
-                "M15": ("5d", "15m"),
+                "M15": ("1mo", "15m"),
                 "M30": ("1mo", "30m"),
-                "H1": ("1mo", "1h"),
-                "H4": ("3mo", "1h"),
+                "H1": ("3mo", "1h"),
+                "H4": ("6mo", "1h"),
                 "D1": ("1y", "1d"),
                 "W1": ("2y", "1wk")
             }
-            period, interval = tf_map.get(timeframe_str.upper(), ("5d", "15m"))
+            period, interval = tf_map.get(timeframe_str.upper(), ("1mo", "15m"))
             
             if symbol in ("XAUUSD", "GOLD"):
                 ticker_sym = "GC=F"
@@ -142,6 +143,9 @@ class DataProvider:
                 df['time'] = df['time'].dt.tz_localize(None)
             cols = ["time", "open", "high", "low", "close", "volume"]
             res_df = df[[c for c in cols if c in df.columns]]
+            
+            # Save to disk cache for future offline fast loading
+            self._save_to_cache(symbol, timeframe_str, res_df)
             return res_df.tail(count).copy()
         except Exception as e:
             logger.debug(f"Cloud fetch error for {symbol}: {e}")
