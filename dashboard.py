@@ -236,6 +236,93 @@ def create_tradingview_pro_chart(df: pd.DataFrame, title: str, entry: float, sl:
     return fig
 
 
+def create_interactive_custom_chart(
+    df: pd.DataFrame,
+    symbol: str,
+    timeframe: str,
+    show_ema_fast: bool = True,
+    show_ema_slow: bool = True,
+    show_vwap: bool = True,
+    show_bb: bool = False,
+    show_volume: bool = True
+) -> go.Figure:
+    """Builds an interactive Studio chart with customizable indicator overlays."""
+    fig = make_subplots(
+        rows=2 if show_volume else 1,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.80, 0.20] if show_volume else [1.0]
+    )
+
+    df_c = df.copy()
+
+    # 1. Candlesticks
+    fig.add_trace(go.Candlestick(
+        x=df_c['time'],
+        open=df_c['open'],
+        high=df_c['high'],
+        low=df_c['low'],
+        close=df_c['close'],
+        increasing_line_color='#00E676',
+        increasing_fillcolor='#00E676',
+        decreasing_line_color='#FF1744',
+        decreasing_fillcolor='#FF1744',
+        name="Price Action",
+        showlegend=False
+    ), row=1, col=1)
+
+    # 2. Fast EMAs
+    if show_ema_fast:
+        df_c['ema9'] = df_c['close'].ewm(span=9, adjust=False).mean()
+        df_c['ema21'] = df_c['close'].ewm(span=21, adjust=False).mean()
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['ema9'], line=dict(color='#00E5FF', width=1.5), name="EMA 9 (Momentum)"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['ema21'], line=dict(color='#FF9100', width=1.5), name="EMA 21 (Trend)"), row=1, col=1)
+
+    # 3. Macro EMAs
+    if show_ema_slow:
+        df_c['ema50'] = df_c['close'].ewm(span=50, adjust=False).mean()
+        df_c['ema200'] = df_c['close'].ewm(span=200, adjust=False).mean() if len(df_c) >= 200 else df_c['ema50']
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['ema50'], line=dict(color='#E040FB', width=1.5), name="EMA 50 (Dynamic S/R)"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['ema200'], line=dict(color='#FFD600', width=2.0, dash="dot"), name="EMA 200 (Macro)"), row=1, col=1)
+
+    # 4. Bollinger Bands
+    if show_bb:
+        sma20 = df_c['close'].rolling(20).mean()
+        std20 = df_c['close'].rolling(20).std()
+        df_c['bb_upper'] = sma20 + (std20 * 2.0)
+        df_c['bb_lower'] = sma20 - (std20 * 2.0)
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['bb_upper'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash="dash"), name="BB Upper (2σ)"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df_c['time'], y=df_c['bb_lower'], line=dict(color='rgba(255, 255, 255, 0.4)', width=1, dash="dash"), name="BB Lower (2σ)", fill="tonexty", fillcolor="rgba(255, 255, 255, 0.03)"), row=1, col=1)
+
+    # 5. Volume Subplot
+    if show_volume:
+        vol_colors = np.where(df_c['close'] >= df_c['open'], '#00E676', '#FF1744')
+        fig.add_trace(go.Bar(
+            x=df_c['time'],
+            y=df_c['volume'],
+            marker_color=vol_colors,
+            opacity=0.6,
+            name="Tick Volume",
+            showlegend=False
+        ), row=2, col=1)
+
+    fig.update_layout(
+        title=f"📈 {symbol} — {timeframe} Interactive Candle Chart",
+        height=520,
+        margin=dict(l=10, r=45, t=40, b=10),
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        paper_bgcolor="#131722",
+        plot_bgcolor="#131722",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10, color="#90CAF9")),
+        xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)"),
+        yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)", side="right")
+    )
+    return fig
+
+
+
 dp = DataProvider()
 profiler = MarketProfiler(dp)
 scanner = ConfluenceScanner(dp)
@@ -308,6 +395,7 @@ st.sidebar.markdown("---")
 
 # Filters
 st.sidebar.markdown("### 🔍 Filter Opportunities")
+search_sym = st.sidebar.text_input("🔎 Search Symbol:", placeholder="e.g. EUR, USD, JPY, XAU").strip().upper()
 killzone_only = st.sidebar.checkbox("⚡ Show Only Killzone Setups", value=False)
 grade_filter = st.sidebar.multiselect(
     "Quality Grade:",
@@ -335,14 +423,15 @@ if opps:
     st.info(f"🔥 **Top Institutional Setup:** `{best_op['symbol']}` **{best_op['direction']}** ({best_op['grade']} — Score: `{best_op['quality_score']}/100`) | R:R: `{best_op['risk_reward']}`")
 
 # ----------------------------------------------------------------------
-# MAIN TABS INTERFACE
+# MAIN TABS INTERFACE (6 Interactive Modules)
 # ----------------------------------------------------------------------
-tab0, tab1, tab2, tab3, tab4 = st.tabs([
-    f"🎯 Day-Trade Setups (M15/H1) ({len(opps)} Active)",
-    f"⚡ Live Scalping Radar (M1/M5) ({len(scalp_opps)} Scalps)",
-    "📊 Currency Strength Matrix (CSM)",
-    "📈 Daily Market & ADR Profiler",
-    "🧪 Strategy Backtester / Validator"
+tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    f"🎯 Day-Trade Setups ({len(opps)} Active)",
+    f"⚡ Live Scalping Radar ({len(scalp_opps)} Scalps)",
+    "📊 Currency Strength Matrix",
+    "📈 Daily ADR & Market Profiler",
+    "🧪 Strategy Backtester",
+    "📈 Interactive Chart Studio (Live)"
 ])
 
 # ----------------------------------------------------------------------
@@ -352,6 +441,8 @@ with tab0:
     # Filter opportunities
     filtered_opps = []
     for op in opps:
+        if search_sym and search_sym not in op["symbol"]:
+            continue
         if killzone_only and "Killzone" not in op.get("session", ""):
             continue
         if any(g.split()[0] in op["grade"] for g in grade_filter):
@@ -402,6 +493,20 @@ with tab0:
                 kpi3.metric("Take Profit 1 (1:2)", f"{opp['take_profit_1']}", f"+{opp['tp1_pips']} pips")
                 kpi4.metric("Take Profit 2 (1:3.5)", f"{opp['take_profit_2']}", f"+{opp['tp2_pips']} pips")
                 kpi5.metric("ADR Consumed", f"{opp.get('adr_consumed_pct', 0)}%", f"{opp.get('adr_remaining_pips', 0)} pips left")
+
+                # Interactive Risk & PnL Simulator
+                with st.expander(f"🧮 Interactive Risk & PnL Simulator for {sym}", expanded=False):
+                    calc_col1, calc_col2 = st.columns(2)
+                    with calc_col1:
+                        sim_risk_pct = st.slider("Simulate Risk per Trade (%):", 0.25, 5.0, float(risk_pct_input), 0.25, key=f"sim_r_dt_{sym}_{idx}")
+                        sim_ps = position_sizer.calculate_lot_size(sym, opp['sl_pips'], account_balance, sim_risk_pct)
+                    with calc_col2:
+                        sim_risk_eur = sim_ps['risk_amount']
+                        sim_tp1_eur = round(sim_risk_eur * 2.0, 2)
+                        sim_tp2_eur = round(sim_risk_eur * 3.5, 2)
+                        st.markdown(f"**Recommended Size:** `{sim_ps['lot_size']} lots` | **Max Loss (SL):** `-€{sim_risk_eur:.2f}`")
+                        st.markdown(f"**Target TP1 Profit (1:2.0):** `+€{sim_tp1_eur:.2f}` (+{sim_risk_pct * 2.0:.1f}%)")
+                        st.markdown(f"**Target TP2 Profit (1:3.5):** `+€{sim_tp2_eur:.2f}` (+{sim_risk_pct * 3.5:.1f}%)")
 
                 # Confluences & Chart Layout
                 chart_col, details_col = st.columns([3, 2])
@@ -454,18 +559,21 @@ with tab1:
     st.markdown("### ⚡ Live Precision Forex Scalper (M1 / M5 High-Frequency Radar)")
     st.markdown("Identifies high-speed institutional micro-structure breakouts, liquidity grabs, and volume surges with tight **3 - 6 pip Stop Losses**.")
 
+    # Filter scalps by search if entered
+    filtered_scalps = [s for s in scalp_opps if not search_sym or search_sym in s["symbol"]]
+
     sc_col1, sc_col2, sc_col3, sc_col4 = st.columns(4)
     sc_col1.metric("Scalp Target Pairs", len(SCALP_TARGET_SYMBOLS))
-    sc_col2.metric("Active Scalps Found", len(scalp_opps))
+    sc_col2.metric("Active Scalps Found", len(filtered_scalps))
     sc_col3.metric("Max Spread Filter", "<= 1.5 pips")
     sc_col4.metric("Avg Trade Duration", "3 - 15 min")
 
     st.markdown("---")
 
-    if not scalp_opps:
+    if not filtered_scalps:
         st.info("💡 No high-conviction M1/M5 scalps active right this second. Continuous Auto-Refresh is scanning live candle by candle.")
     else:
-        for idx, sc in enumerate(scalp_opps, 1):
+        for idx, sc in enumerate(filtered_scalps, 1):
             sym = sc["symbol"]
             is_buy = sc["direction"] == "BUY"
             badge_class = "badge-buy" if is_buy else "badge-sell"
@@ -492,6 +600,20 @@ with tab1:
                 ps_col1.metric("📊 Lot Size (1% Risk)", f"{ps['lot_size']:.2f} lots", f"Risk: €{ps['risk_amount']:.2f}", delta_color="off")
                 ps_col2.metric("💰 Pip Value / Lot", f"€{ps['pip_value']:.3f}")
                 ps_col3.metric("⚖️ Risk/Pip at Size", f"€{ps['risk_per_pip']:.3f}")
+
+                # Interactive Risk & PnL Simulator for Scalp
+                with st.expander(f"🧮 Interactive Scalp Risk & PnL Simulator for {sym}", expanded=False):
+                    calc_col1, calc_col2 = st.columns(2)
+                    with calc_col1:
+                        sim_risk_pct = st.slider("Simulate Risk %:", 0.25, 5.0, float(risk_pct_input), 0.25, key=f"sim_r_sc_{sym}_{idx}")
+                        sim_ps = position_sizer.calculate_lot_size(sym, sc['sl_pips'], account_balance, sim_risk_pct)
+                    with calc_col2:
+                        sim_risk_eur = sim_ps['risk_amount']
+                        sim_tp1_eur = round(sim_risk_eur * 2.0, 2)
+                        sim_tp2_eur = round(sim_risk_eur * 3.2, 2)
+                        st.markdown(f"**Lots:** `{sim_ps['lot_size']} lots` | **Max Loss:** `-€{sim_risk_eur:.2f}`")
+                        st.markdown(f"**Quick TP1 Gain (1:2.0):** `+€{sim_tp1_eur:.2f}` (+{sim_risk_pct * 2.0:.1f}%)")
+                        st.markdown(f"**Runner TP2 Gain (1:3.2):** `+€{sim_tp2_eur:.2f}` (+{sim_risk_pct * 3.2:.1f}%)")
 
                 sc_chart_col, sc_det_col = st.columns([3, 2])
 
@@ -614,6 +736,30 @@ with tab2:
 
     div_df = pd.DataFrame(divergences).sort_values(by="Net Divergence", key=abs, ascending=False)
     st.dataframe(div_df, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🔄 Interactive Currency Pair Matchmaker")
+    m_col1, m_col2, m_col3 = st.columns(3)
+    with m_col1:
+        base_curr = st.selectbox("Base Currency (Primary):", CURRENCIES, index=0, key="match_base")
+    with m_col2:
+        quote_options = [c for c in CURRENCIES if c != base_curr]
+        quote_curr = st.selectbox("Quote Currency (Opposing):", quote_options, index=min(3, len(quote_options)-1), key="match_quote")
+    with m_col3:
+        b_score = csm_scores.get(base_curr, 0.0)
+        q_score = csm_scores.get(quote_curr, 0.0)
+        net_diff = round(b_score - q_score, 2)
+        if net_diff >= 3.0:
+            bias_res = "🟢 STRONG BUY"
+        elif net_diff >= 1.2:
+            bias_res = "🟢 MODERATE BUY"
+        elif net_diff <= -3.0:
+            bias_res = "🔴 STRONG SELL"
+        elif net_diff <= -1.2:
+            bias_res = "🔴 MODERATE SELL"
+        else:
+            bias_res = "⚪ NEUTRAL / RANGE"
+        st.metric(f"Matchup: {base_curr}/{quote_curr}", bias_res, f"Net Divergence: {net_diff:+.2f}")
 
 # ----------------------------------------------------------------------
 # TAB 3: DAILY MARKET & ADR PROFILER
@@ -748,6 +894,76 @@ with tab4:
                         "equity_after": "Balance (€)"
                     }, inplace=True)
                     st.dataframe(display_df, use_container_width=True)
+
+# ----------------------------------------------------------------------
+# TAB 5: INTERACTIVE CHART STUDIO (LIVE DEEP-DIVE)
+# ----------------------------------------------------------------------
+with tab5:
+    st.markdown("### 📈 Interactive Multi-Timeframe Chart Studio & Technical Inspector")
+    st.markdown("Select any Forex pair or commodity to inspect live candlestick price action, customize indicator overlays, and view real-time technical metrics.")
+
+    studio_col1, studio_col2, studio_col3, studio_col4 = st.columns([2, 2, 2, 2])
+    with studio_col1:
+        studio_sym = st.selectbox("Select Asset / Symbol:", TARGET_SYMBOLS, index=0, key="studio_symbol_select")
+    with studio_col2:
+        studio_tf = st.selectbox("Timeframe:", ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"], index=2, key="studio_tf_select")
+    with studio_col3:
+        studio_bars = st.slider("Candles Count:", 30, 300, 100, step=10, key="studio_bars_slider")
+    with studio_col4:
+        st.caption("⚡ Live Snapshot")
+        sym_info_st = dp.get_symbol_info(studio_sym)
+        if sym_info_st:
+            st.markdown(f"**Bid:** `{sym_info_st['bid']}` | **Ask:** `{sym_info_st['ask']}` | **Spread:** `{sym_info_st['spread_pips']}p`")
+
+    # Indicator Toggles
+    ind_col1, ind_col2, ind_col3, ind_col4, ind_col5 = st.columns(5)
+    with ind_col1:
+        t_ema_fast = st.checkbox("EMA 9 & 21 (Ribbon)", value=True, key="t_ema_fast")
+    with ind_col2:
+        t_ema_slow = st.checkbox("EMA 50 & 200 (Macro)", value=True, key="t_ema_slow")
+    with ind_col3:
+        t_bb = st.checkbox("Bollinger Bands (20, 2)", value=False, key="t_bb")
+    with ind_col4:
+        t_vol = st.checkbox("Volume Subplot", value=True, key="t_vol")
+    with ind_col5:
+        if st.button("🔄 Refresh Chart", key="refresh_studio_btn", use_container_width=True):
+            st.rerun()
+
+    # Load & Render Chart
+    df_studio = dp.get_rates(studio_sym, studio_tf, count=studio_bars)
+    if df_studio is not None and not df_studio.empty:
+        fig_studio = create_interactive_custom_chart(
+            df=df_studio,
+            symbol=studio_sym,
+            timeframe=studio_tf,
+            show_ema_fast=t_ema_fast,
+            show_ema_slow=t_ema_slow,
+            show_bb=t_bb,
+            show_volume=t_vol
+        )
+        st.plotly_chart(fig_studio, use_container_width=True)
+
+        # Technical Metrics Bar
+        st.markdown("#### 🔍 Real-Time Technical Health & Structural Metrics")
+        st_m1, st_m2, st_m3, st_m4 = st.columns(4)
+        
+        atr_val = dp.get_atr(studio_sym, studio_tf, period=14)
+        pip_sz = sym_info_st['pip_size'] if sym_info_st else 0.0001
+        atr_pips = round(atr_val / pip_sz, 1) if pip_sz > 0 else 0.0
+        
+        htf_st = profiler.get_htf_trend_bias(studio_sym)
+        csm_div = profiler.get_pair_strength_divergence(studio_sym, csm)
+        
+        with st_m1:
+            st.metric("ATR Volatility (14)", f"{atr_pips} pips")
+        with st_m2:
+            st.metric("CSM Net Flow", f"{csm_div['net_divergence']:+.2f}", f"{csm_div['bias']}")
+        with st_m3:
+            st.metric("HTF Structure", f"{htf_st['bias']}", f"D1: {htf_st['d1_trend']} | H4: {htf_st['h4_trend']}")
+        with st_m4:
+            st.metric("D1/H4/H1 Consensus", f"{htf_st['alignment_label']}")
+    else:
+        st.warning(f"⚠️ Could not load data for {studio_sym} at timeframe {studio_tf}. Please try another timeframe.")
 
 # ----------------------------------------------------------------------
 # LIVE AUTO-REFRESH TRIGGER

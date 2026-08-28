@@ -40,9 +40,9 @@ logger = logging.getLogger("ScalperEngine")
 
 SCALP_TARGET_SYMBOLS = TARGET_SYMBOLS
 
-MAX_SPREAD_COST_PCT = 16.0   # Spread cannot exceed 16% of M5 ATR
-MIN_M5_ADX         = 22.0   # Strict Wilder ADX filter to eliminate all sideways chop (Sniper Elite)
-MIN_CLEAN_AIR_RATIO = 1.8   # Must have >= 1.8x SL room to next HTF wall
+MAX_SPREAD_COST_PCT = 25.0   # Spread cannot exceed 25% of M5 ATR
+MIN_M5_ADX         = 15.0   # Balanced Wilder ADX (filters dead chop while allowing steady trends)
+MIN_CLEAN_AIR_RATIO = 1.3   # Must have >= 1.3x SL room to next HTF wall
 
 # Per-pair minimum SL in pips (ATR-based SL cannot go below these)
 PAIR_MIN_SL_PIPS = {
@@ -246,8 +246,8 @@ class ScalperEngine:
         m5_adx_cur    = float(df_m5['adx'].iloc[-1])
         ema9_slope_pips = (m5_ema9_cur - float(df_m5['ema9'].iloc[-4])) / (3 * pip_size)
 
-        m5_bullish = (m5_cur_close > m5_ema9_cur > m5_ema21_cur) and (ema9_slope_pips >= 0.3) and (m5_adx_cur >= MIN_M5_ADX)
-        m5_bearish = (m5_cur_close < m5_ema9_cur < m5_ema21_cur) and (ema9_slope_pips <= -0.3) and (m5_adx_cur >= MIN_M5_ADX)
+        m5_bullish = (m5_cur_close > m5_ema9_cur > m5_ema21_cur) and (ema9_slope_pips >= 0.15) and (m5_adx_cur >= MIN_M5_ADX)
+        m5_bearish = (m5_cur_close < m5_ema9_cur < m5_ema21_cur) and (ema9_slope_pips <= -0.15) and (m5_adx_cur >= MIN_M5_ADX)
 
         if not (m5_bullish or m5_bearish):
             return None
@@ -273,15 +273,15 @@ class ScalperEngine:
             m1_atr = float((m1_high - m1_low).tail(10).mean())
         m1_atr_pips = m1_atr / pip_size
 
-        # Displacement: ONLY prev_bar (confirmed closed) — Bug #4 fixed
+        # Displacement: body check on confirmed closed candle
         prev_body = abs(float(prev_bar['close']) - float(prev_bar['open']))
-        has_displacement = prev_body >= m1_atr * 0.85
+        has_displacement = prev_body >= m1_atr * 0.60
 
-        # Volume surge: lifted threshold 1.25x → 1.75x (Bug #8 fixed)
+        # Volume surge check
         avg_vol = float(m1_vol.iloc[-13:-1].mean())   # exclude current bar
         prev_vol = float(prev_bar['volume'])
         vol_ratio = round(prev_vol / max(1.0, avg_vol), 2)
-        vol_surge = vol_ratio >= 1.75
+        vol_surge = vol_ratio >= 1.20
 
         # Structural swing levels (12-bar window, excluding last 2 bars)
         recent_m1_high = float(m1_high.iloc[-14:-2].max())

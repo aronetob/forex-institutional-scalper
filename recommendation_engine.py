@@ -171,8 +171,8 @@ class RecommendationEngine:
         bullish_score = min(100, bullish_score)
         bearish_score = min(100, bearish_score)
 
-        # Strict Quality Filter: Only allow Score >= 75 to eliminate low-grade noise
-        MIN_QUALITY_SCORE = 75
+        # Quality Filter: Allow Score >= 55 (Grade B, A, A+)
+        MIN_QUALITY_SCORE = 55
 
         # Determine winner
         if bullish_score >= bearish_score and bullish_score >= MIN_QUALITY_SCORE:
