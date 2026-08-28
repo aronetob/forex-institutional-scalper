@@ -403,6 +403,8 @@ grade_filter = st.sidebar.multiselect(
     default=["GRADE A+ (Institutional Prime)", "GRADE A (High Conviction)", "GRADE B (Moderate Opportunity)"]
 )
 dir_filter = st.sidebar.radio("Direction:", ["ALL", "BUY Only", "SELL Only"])
+st.sidebar.markdown("---")
+st.sidebar.caption("⚠️ **Educational & Research Platform:** This software is strictly for quantitative analysis, simulation, and educational purposes. Not financial advice.")
 
 # ----------------------------------------------------------------------
 # HEADER
@@ -964,6 +966,12 @@ with tab5:
             st.metric("D1/H4/H1 Consensus", f"{htf_st['alignment_label']}")
     else:
         st.warning(f"⚠️ Could not load data for {studio_sym} at timeframe {studio_tf}. Please try another timeframe.")
+
+# ----------------------------------------------------------------------
+# EDUCATIONAL DISCLAIMER FOOTER
+# ----------------------------------------------------------------------
+st.markdown("---")
+st.markdown("<div style='text-align: center; color: #78909C; font-size: 0.82rem; padding: 12px;'>⚠️ <b>Educational & Research Disclaimer:</b> This software is developed strictly for quantitative research, algorithmic analysis, and educational purposes. It does not constitute financial, investment, legal, or trading advice. Past performance or backtested results do not guarantee future returns.</div>", unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------
 # LIVE AUTO-REFRESH TRIGGER

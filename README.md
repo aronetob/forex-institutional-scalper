@@ -229,9 +229,15 @@ forex-institutional-scalper/
 
 ---
 
-## ⚠️ Risk & Educational Disclaimer
+## ⚠️ Legal & Educational Disclaimer
 
-*This software is developed strictly for quantitative research, algorithmic analysis, and educational purposes. Forex, CFD, and leveraged commodity trading involve significant risk of capital loss. Past performance in backtesting or paper trading is not indicative of future results. Always test thoroughly on simulated demo accounts before risking live capital.*
+> [!WARNING]
+> **FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**
+> 
+> * This software, along with all associated models, strategies, scripts, signals, indicators, and documentation, is provided strictly for **educational, academic, and quantitative research purposes**.
+> * **Not Financial or Investment Advice:** Nothing in this repository constitutes financial, investment, legal, tax, or trading advice. No recommendations to buy, sell, or hold any security, currency pair, commodity, or financial instrument are made.
+> * **High Risk Warning:** Trading foreign exchange (Forex), commodities, and contracts for difference (CFDs) carries a high level of risk and may not be suitable for all investors. High leverage can work against you as well as for you. Before deciding to trade, carefully consider your investment objectives, level of experience, and risk appetite. There is a possibility that you may sustain a loss of some or all of your initial capital.
+> * **No Guarantee of Performance:** Past performance, backtesting results, and simulated models do not guarantee or predict future results. The authors and contributors assume no responsibility or liability for any financial losses or damages resulting from the use or misuse of this software. Always test strategies thoroughly on demo/paper-trading accounts.
 
 ---
 
