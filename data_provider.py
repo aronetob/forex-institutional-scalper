@@ -107,6 +107,46 @@ class DataProvider:
             return self._init_mt5()
         return True
 
+    def _fetch_from_cloud(self, symbol: str, timeframe_str: str = "M15", count: int = 100) -> Optional[pd.DataFrame]:
+        """Cloud fallback to fetch live OHLCV data using yfinance when MT5 is not connected (e.g. Streamlit Cloud / Linux)."""
+        try:
+            import yfinance as yf
+            tf_map = {
+                "M1": ("1d", "1m"),
+                "M5": ("5d", "5m"),
+                "M15": ("5d", "15m"),
+                "M30": ("1mo", "30m"),
+                "H1": ("1mo", "1h"),
+                "H4": ("3mo", "1h"),
+                "D1": ("1y", "1d"),
+                "W1": ("2y", "1wk")
+            }
+            period, interval = tf_map.get(timeframe_str.upper(), ("5d", "15m"))
+            
+            if symbol in ("XAUUSD", "GOLD"):
+                ticker_sym = "GC=F"
+            elif symbol in ("XAGUSD", "SILVER"):
+                ticker_sym = "SI=F"
+            else:
+                ticker_sym = f"{symbol}=X"
+
+            t = yf.Ticker(ticker_sym)
+            df = t.history(period=period, interval=interval)
+            if df is None or df.empty:
+                return self._load_from_cache(symbol, timeframe_str)
+                
+            df = df.reset_index()
+            time_col = "Datetime" if "Datetime" in df.columns else "Date"
+            df.rename(columns={time_col: "time", "Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
+            if hasattr(df['time'].dt, 'tz') and df['time'].dt.tz is not None:
+                df['time'] = df['time'].dt.tz_localize(None)
+            cols = ["time", "open", "high", "low", "close", "volume"]
+            res_df = df[[c for c in cols if c in df.columns]]
+            return res_df.tail(count).copy()
+        except Exception as e:
+            logger.debug(f"Cloud fetch error for {symbol}: {e}")
+            return self._load_from_cache(symbol, timeframe_str)
+
     def get_symbol_info(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Retrieves live symbol specifications with 1.5s in-memory caching."""
         now = time.time()
@@ -116,7 +156,34 @@ class DataProvider:
                 return val
 
         if not self.ensure_connection():
-            return None
+            # Cloud fallback symbol info
+            digits = 3 if "JPY" in symbol else (2 if "XAU" in symbol else 5)
+            pip_size = 0.01 if "JPY" in symbol else (0.10 if "XAU" in symbol else 0.0001)
+            df_m1 = self.get_rates(symbol, "M15", count=2)
+            if df_m1 is not None and not df_m1.empty:
+                last_price = float(df_m1['close'].iloc[-1])
+            else:
+                last_price = 1.0
+            
+            spread_pips = 1.2
+            res = {
+                "symbol":        symbol,
+                "bid":           last_price,
+                "ask":           last_price + (spread_pips * pip_size),
+                "spread_points": 12,
+                "spread_pips":   spread_pips,
+                "point":         pip_size / 10.0,
+                "digits":        digits,
+                "pip_size":      pip_size,
+                "tick_value":    1.0,
+                "tick_size":     pip_size,
+                "volume_min":    0.01,
+                "volume_step":   0.01,
+                "visible":       True,
+                "contract_size": 100000,
+            }
+            self._info_cache[symbol] = (now, res)
+            return res
 
         with self._mt5_lock:
             if symbol not in self._selected_symbols:
@@ -168,9 +235,8 @@ class DataProvider:
 
         Cache strategy (v3.0):
           - Key is (symbol, timeframe) — NOT (symbol, timeframe, count).
-          - Always fetches max(count, _MIN_FETCH_COUNT[tf]) bars from MT5.
+          - Always fetches max(count, _MIN_FETCH_COUNT[tf]) bars from MT5 / Cloud.
           - Returns tail-sliced copy so every caller gets exactly `count` rows.
-          - One MT5 call serves all callers regardless of their requested count.
         """
         tf_key = timeframe_str.upper()
         cache_key = (symbol, tf_key)
@@ -184,6 +250,10 @@ class DataProvider:
                 return df_cached.tail(count).copy()
 
         if not self.ensure_connection():
+            df_cloud = self._fetch_from_cloud(symbol, timeframe_str, actual_fetch)
+            if df_cloud is not None and not df_cloud.empty:
+                self._rates_cache[cache_key] = (now, df_cloud)
+                return df_cloud.tail(count).copy()
             return self._load_from_cache(symbol, timeframe_str)
 
         tf = TIMEFRAME_MAP.get(tf_key)
@@ -198,6 +268,10 @@ class DataProvider:
             rates = mt5.copy_rates_from_pos(symbol, tf, 0, actual_fetch)
 
         if rates is None or len(rates) == 0:
+            df_cloud = self._fetch_from_cloud(symbol, timeframe_str, actual_fetch)
+            if df_cloud is not None and not df_cloud.empty:
+                self._rates_cache[cache_key] = (now, df_cloud)
+                return df_cloud.tail(count).copy()
             return self._load_from_cache(symbol, timeframe_str)
 
         df = pd.DataFrame(rates)
